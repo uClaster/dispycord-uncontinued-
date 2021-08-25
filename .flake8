@@ -1,0 +1,9 @@
+[flake8]
+
+ignore = 
+	# W292: No newline.
+	W292,
+	# W191: indentation contain tabs.
+	W191,
+	# W293: Blank line contains whitespace.
+	W293
