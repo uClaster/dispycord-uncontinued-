@@ -39,9 +39,7 @@ class Gateway:
 	
 	async def connect(self) -> None:
 		
-		async with (
-			self._client.http.client_session.ws_connect(WSS)
-		) as ws:
+		async with self._client.http.client_session.ws_connect(WSS) as ws:
 			self._ws = ws
 			
 			while True:
