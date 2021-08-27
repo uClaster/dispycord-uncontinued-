@@ -24,7 +24,7 @@ class Client:
 		self._http = HTTP(self, token=token)
 		
 		self._loop.run_until_complete(
-			self._gateway.connect() 
+			self._gateway.connect()
 		)
 		
 	@property

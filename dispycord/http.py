@@ -5,7 +5,6 @@ __all__ = ("HTTP",)
 
 
 class HTTP:
-	
 	def __init__(self, *args, **kwargs):
 		
 		self._client = args[0]
@@ -13,6 +12,8 @@ class HTTP:
 		self._token = kwargs.get('token')
 		
 	def Route(self) -> Union[dict, str]:
+		
+		""" Send a request to Discord HTTP. """
 		
 		return {}
 		
