@@ -1,12 +1,13 @@
 import asyncio
 import json
-from aiohttp import ClientWebSocketResponse
+from aiohttp import ClientWebSocketResponse, WSMsgType
 from typing import Dict, Union, TYPE_CHECKING, Optional
+
+from .intents import Intent
+from .errors import error
 
 if TYPE_CHECKING:
 	from . import ext
-
-__all__ = ("Gateway",)
 
 DISPATCH = 0
 HEARTBEAT = 1
@@ -23,12 +24,18 @@ WSS = "wss://gateway.discord.gg/?v=8&encoding=json"
 
 
 class Gateway:
-	def __init__(self, *args):
+	def __init__(self, *args, **options):
 		self._client: ext.Client = args[0]
 		self._ws: Optional[ClientWebSocketResponse] = None
 		
 		self._interval: Union[int, float] = 41.25
-		self._reconnect: bool = True
+		self._acked: bool = False
+		self._resuming: bool = False
+		
+		self._intents: int = options.get("intent", Intent.default())
+		
+		self._session_id: str = ''
+		self._seq: Optional[int] = None
 	
 	async def connect(self) -> None:
 		
@@ -39,22 +46,36 @@ class Gateway:
 			
 			while True:
 				
-				if isinstance((message := await ws.receive()).data, int):
-					print("Got integer code.")
-					exit(1)
-					
-				await self.handle_payload(
-					json.loads(message.data)
-				)
+				if (message := await ws.receive()).type in (WSMsgType.CLOSE, WSMsgType.CLOSED,):
+					await self.handle_disconnect(
+						code=str(message.data),
+						extra=message.extra
+					)
 				
+				try:
+					await self.handle_payload(
+						json.loads(message.data)
+					)
+				except TypeError:
+					break
+				
+		if not self._acked:
+			await self._client.loop.close()
+			exit(1)
+			
+		await self.connect()
+		
 	async def identify(self) -> None:
+		
+		if self._acked:
+			return None
 		
 		await self._ws.send_json(
 			{
 				"op": IDENTIFY,
 				"d": {
 					"token": self._client.http.token,
-					"intents": 513,
+					"intents": self._intents,
 					"properties": {
 						"$os": "linux",
 						"$browser": "dispycord",
@@ -64,16 +85,16 @@ class Gateway:
 			}
 		)
 		
-		self._reconnect = False
+		self._acked = True
 		
 	async def heartbeat(self) -> None:
 		
 		while True:
 			
 			await asyncio.sleep(
-				4
-				if self._reconnect
-				else self._interval
+				self._interval
+				if self._acked
+				else 4
 			)
 			
 			await self._ws.send_json(
@@ -82,25 +103,63 @@ class Gateway:
 					"d": None
 				}
 			)
+			
+	async def resume(self) -> None:
+		
+		await self._ws.send_json(
+			{
+				"op": RESUME,
+				"d": {
+					"token": self._client.http.token,
+					"session_id": self._session_id,
+					"seq": self._seq
+				}
+			}
+		)
+		
+		self._resuming = False
+			
+	async def handle_disconnect(
+		self,
+		**data
+	) -> None:
+		
+		if (code := data.get('code')) in error.keys():
+			raise error[code](data.get("extra"))
+			
+		if (extra := data.get('extra')) is None:
+			
+			await self._ws.close(code=1002)
+			self._resuming = True
 		
 	async def handle_payload(
 		self,
 		data: Dict[str, Union[str, int]]
 	) -> None:
 		
+		if isinstance(s := data['s'], int):
+			self._seq = s
+		
 		if (op := data['op']) == HELLO:
 			self._client.loop.create_task(
 				self.heartbeat()
 			)
 			
-		elif op == ACK and self._reconnect:
+		elif op == ACK:
+			
+			if self._resuming:
+				await self.resume()
+			
 			self._client.loop.create_task(
 				self.identify()
 			)
 			
 		elif op == DISPATCH:
 			
-			ev = getattr(self._client, "on_"+data['t'].lower(), None)
+			if data['d'].get('session_id', None) is not None:
+				self._session_id = data['d']['session_id']
+			
+			ev = getattr(self._client, "on_" + data['t'].lower(), None)
 			
 			if ev is None:
 				return None
@@ -111,3 +170,7 @@ class Gateway:
 				)
 				
 			self._client.loop.create_task(ev())
+			
+		elif op == RECONNECT:
+			
+			print("Bot reconnected after resumed.")

@@ -7,3 +7,5 @@ ignore =
 	W191,
 	# W293: Blank line contains whitespace.
 	W293
+	# F401: Unused imports.
+	F401
