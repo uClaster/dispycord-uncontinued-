@@ -26,7 +26,7 @@ WSS = "wss://gateway.discord.gg/?v=8&encoding=json"
 class Gateway:
 	def __init__(self, *args, **options):
 		self._client: ext.Client = args[0]
-		self._ws: Optional[ClientWebSocketResponse] = None
+		self._ws: Optional[ClientWebSocketResponse] = None # type: ignore
 		
 		self._interval: Union[int, float] = 41.25
 		self._acked: bool = False
@@ -38,14 +38,17 @@ class Gateway:
 		self._seq: Optional[int] = None
 	
 	async def connect(self) -> None:
-		
+		"""
+		Listen for gateway messages.
+		| Messages category are depends on bot's intents.
+		"""
 		async with self._client.http.client_session.ws_connect(WSS) as ws:
 			self._ws = ws
 			
 			while True:
 				
 				if (message := await ws.receive()).type in (WSMsgType.CLOSE, WSMsgType.CLOSED,):
-					await self.handle_disconnect(
+					await self.emit_closing(
 						code=str(message.data),
 						extra=message.extra
 					)
@@ -58,7 +61,6 @@ class Gateway:
 					break
 				
 		if not self._acked:
-			await self._client.loop.close()
 			exit(1)
 			
 		await self.connect()
@@ -82,7 +84,6 @@ class Gateway:
 				}
 			}
 		)
-		
 		self._acked = True
 		
 	async def heartbeat(self) -> None:
@@ -114,10 +115,9 @@ class Gateway:
 				}
 			}
 		)
-		
 		self._resuming = False
 			
-	async def handle_disconnect(
+	async def emit_closing(
 		self,
 		**data
 	) -> None:
@@ -152,23 +152,14 @@ class Gateway:
 				self.identify()
 			)
 			
-		elif op == DISPATCH:
-			
-			if data['d'].get('session_id', None) is not None:
-				self._session_id = data['d']['session_id']
-			
-			ev = getattr(self._client, "on_" + data['t'].lower(), None)
-			
-			if ev is None:
-				return None
-			
-			if not asyncio.iscoroutinefunction(ev):
-				raise TypeError(
-					f"'{ev.__name__}' must be coroutine function."
-				)
-				
-			self._client.loop.create_task(ev())
-			
 		elif op == RECONNECT:
 			
 			print("Bot reconnected after resumed.")
+			
+		elif op == DISPATCH:
+			
+			if data['d'].get('session_id', None) is not None: # type: ignore
+				self._session_id = data['d']['session_id'] # type: ignore
+				
+			if (ev := self._client.listeners.get('on_'+data['t'].lower(), None)) is not None:
+				self._client.loop.create_task(ev['function']())

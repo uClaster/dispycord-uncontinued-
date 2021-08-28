@@ -19,7 +19,11 @@ class Client:
 		self._http: Optional[HTTP] = None
 	
 	def run(self, token: str) -> None:
+		"""
+		If succeed, your bot will on ready state.
 		
+		:param token: Bot's token.
+		"""
 		self._gateway = Gateway(self)
 		self._http = HTTP(self, token=token)
 		

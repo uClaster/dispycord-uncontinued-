@@ -4,17 +4,14 @@ __all__ = (
 
 
 class BaseError(Exception):
-	
 	...
 	
 	
 class LoginFailure(BaseError):
-	
 	...
 	
 	
 class UncaughtError(BaseError):
-	
 	...
 	
 	

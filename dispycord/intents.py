@@ -1,10 +1,11 @@
-from typing import List
+from typing import final, List
 
 __all__ = (
 	"Intent",
 )
 
 
+@final
 class Intent:
 	
 	intent_list: List[str] = [
@@ -27,14 +28,17 @@ class Intent:
 	
 	@classmethod
 	def all(cls) -> int:
+		""" Using all intent. ( not recommended. ) """
 		return 32767
 	
 	@classmethod
 	def default(cls) -> int:
+		""" Default Intent """
 		return 513
 		
 	@classmethod
 	def get(cls, **intent) -> int:
+		""" User defined intent """
 		return (
 			sum(
 				[
