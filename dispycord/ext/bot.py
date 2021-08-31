@@ -13,23 +13,28 @@ class Bot(Client):
 	
 	def __init__(self, **option):
 		super().__init__(**option)
-		self._commands: dict = {}
+		self._commands: list = []
 		self._listeners: dict = {}
 	
 	def command(self, **option):
-		"""option param
+		""" Command registers.
+		Automatically generating slash commands.
 		
-		:param option.slash_command:
+		Parameter
+		-----------
 		
-			If this is set to True, the command will be slash command.
-				Else it will be normal command with message invoking.
-				
-				Note: You should use slash command instead of with message command
-						As Discord expect us to migrate to slash command per 2022 and
-						You will have to enabled message privileged intent afterall.
+		:param option:
+		---------------
+			| guild_only: book
 		"""
-		def inner(function: Callable[..., Any]):
-			self.add('_commands', function, option)
+		def inner(function: Callable[..., Any]) -> Command:
+			
+			command = Command(
+				function,
+				**option
+			)
+			self._commands.append(command)
+			return command
 			
 		return inner
 		
@@ -40,7 +45,7 @@ class Bot(Client):
 		:param option.run_once: whether the event should only run once.
 		"""
 		def inner(function: Callable[..., Any]):
-			self.add('_listeners', function, option)
+			self.add('listeners', function, option)
 			
 		return inner
 			
@@ -51,9 +56,9 @@ class Bot(Client):
 		opt: dict
 	) -> None:
 		"""
-		Helper to insert data to :bound:
+		Helper to insert callable to :bound:
 		
-		:param bound: A dict that contains command or listener.
+		:param bound: A dict that contains comand or listener.
 		:param function: command's or event's function.
 		:param opt: command's or event's kwargs.
 		"""
@@ -65,11 +70,11 @@ class Bot(Client):
 			
 		opt['function'] = function
 		types[function.__name__] = opt
-			
-	@property
-	def commands(self):
-		return self._commands
 		
 	@property
 	def listeners(self):
 		return self._listeners
+		
+	@property
+	def commands(self):
+		return self._commands

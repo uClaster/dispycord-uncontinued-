@@ -43,7 +43,7 @@ class Intent:
 			sum(
 				[
 					1 << cls.intent_list.index(i)
-					if val in cls.intent_list else 0
+					if i.upper() in cls.intent_list else 0
 					for i, val in intent.items()
 				]
 			)

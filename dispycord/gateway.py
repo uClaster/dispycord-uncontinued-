@@ -20,12 +20,12 @@ REQUEST_GUILD_MEMBERS = 8
 INVALID_SESSION = 9
 HELLO = 10
 ACK = 11
-WSS = "wss://gateway.discord.gg/?v=8&encoding=json"
+WSS = "wss://gateway.discord.gg/?v=9&encoding=json"
 
 
 class Gateway:
 	def __init__(self, *args, **options):
-		self._client: ext.Client = args[0]
+		self._client: Union[ext.Bot, ext.Client] = args[0]
 		self._ws: Optional[ClientWebSocketResponse] = None # type: ignore
 		
 		self._interval: Union[int, float] = 41.25
@@ -34,7 +34,7 @@ class Gateway:
 		
 		self._intents: int = options.get("intent", Intent.default())
 		
-		self._session_id: str = ''
+		self._session_id: Optional[str] = None
 		self._seq: Optional[int] = None
 	
 	async def connect(self) -> None:
@@ -52,7 +52,7 @@ class Gateway:
 						code=str(message.data),
 						extra=message.extra
 					)
-				
+					
 				try:
 					await self.handle_payload(
 						json.loads(message.data)
@@ -66,7 +66,15 @@ class Gateway:
 		await self.connect()
 		
 	async def identify(self) -> None:
+		"""
+		If this section is accepted, your bot will on ready state.
+		Additional information:
 		
+		| token: your bot's token
+		| intents: bot's intents. default is 513.
+		| browser: Library's name
+		| device: Library's name
+		"""
 		if self._acked:
 			return None
 		
@@ -87,7 +95,10 @@ class Gateway:
 		self._acked = True
 		
 	async def heartbeat(self) -> None:
-		
+		"""
+		Start heartbeat.
+		| this way is to maintain connection between client and server
+		"""
 		while True:
 			
 			await asyncio.sleep(
@@ -104,7 +115,10 @@ class Gateway:
 			)
 			
 	async def resume(self) -> None:
-		
+		"""
+		An expected call when your bot's got disconnected.
+		| Not Tested |
+		"""
 		await self._ws.send_json(
 			{
 				"op": RESUME,
@@ -121,11 +135,14 @@ class Gateway:
 		self,
 		**data
 	) -> None:
-		
+		"""
+		Showing's the websockets closing reason.
+		| check whether resume is possible.
+		"""
 		if (code := data.get('code')) in error.keys():
 			raise error[code](data.get("extra"))
 			
-		if (extra := data.get('extra')) is None:
+		if data.get('extra') is None:
 			
 			await self._ws.close(code=1002)
 			self._resuming = True
@@ -134,6 +151,8 @@ class Gateway:
 		self,
 		data: Dict[str, Union[str, int]]
 	) -> None:
+		
+		""" Handle messages payload """
 		
 		if isinstance(s := data['s'], int):
 			self._seq = s
@@ -147,19 +166,39 @@ class Gateway:
 			
 			if self._resuming:
 				await self.resume()
+				
+			if self._acked:
+				return
 			
 			self._client.loop.create_task(
 				self.identify()
 			)
 			
 		elif op == RECONNECT:
-			
-			print("Bot reconnected after resumed.")
+			...
 			
 		elif op == DISPATCH:
-			
-			if data['d'].get('session_id', None) is not None: # type: ignore
-				self._session_id = data['d']['session_id'] # type: ignore
+			print("dispatch")
+			if (t := data['t'].lower()) == 'ready': # type: ignore
 				
-			if (ev := self._client.listeners.get('on_'+data['t'].lower(), None)) is not None:
+				self._session_id = data['d']['session_id'] # type: ignore
+				self._client.data = data['d']['user'] # type: ignore
+				
+				for command in self._client.commands: # type: ignore
+					
+					slash_option: dict = command.to_dict()
+					
+					endpoint: str = f'/applications/{self._client.id}/commands'
+					
+					if not command.is_global():
+						guild = slash_option.pop('guild')
+						endpoint = f'/applications/{self._client.id}/guilds/{guild}/commands'
+					
+					await self._client.http.Route(
+						slash_option,
+						endpoint,
+						'POST'
+					)
+				
+			if (ev := self._client.listeners.get('on_'+t, None)) is not None: # type: ignore
 				self._client.loop.create_task(ev['function']())

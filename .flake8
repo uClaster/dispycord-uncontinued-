@@ -6,6 +6,8 @@ ignore =
 	# W191: indentation contain tabs.
 	W191,
 	# W293: Blank line contains whitespace.
-	W293
+	W293,
 	# F401: Unused imports.
-	F401
+	F401,
+	E261,
+	E226

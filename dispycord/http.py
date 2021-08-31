@@ -1,7 +1,11 @@
 import aiohttp
-from typing import Union
+from typing import Union, Optional
 
-__all__ = ("HTTP",)
+__all__ = (
+	"HTTP",
+)
+
+base_url = 'https://discord.com/api/v9'
 
 
 class HTTP:
@@ -10,12 +14,41 @@ class HTTP:
 		self._client = args[0]
 		self._client_session = aiohttp.ClientSession()
 		self._token = kwargs.get('token')
+		self._authorization = {'Authorization': f'Bot {self._token}'}
 		
-	def Route(self) -> Union[dict, str]:
+	async def Route(
+		self,
+		data: dict,
+		endpoint: str,
+		method: str
+	) -> None:
+		"""
+		Send data to Discord HTTP
 		
-		""" Send a request to Discord HTTP. """
+		Parameter
+		----------
+		: data : data payload to send
 		
-		return {}
+		: endpoint : HTTP endpoint
+		
+		: method :	either post, delete, put, patch or get
+					mostly of methods are not implemented yet.
+		
+		"""
+		url = f"{base_url}/{endpoint}"
+		
+		if method.lower() == 'get':
+			return
+		else:
+			data = await self.client_session.post(
+				url,
+				json=data,
+				headers=self._authorization
+			)
+		
+		if (status := str(data.status))[0] != '2': # type: ignore
+			print(f"code {status}: Command registering for {data['name']} failed.")
+			exit(1)
 		
 	@property
 	def token(self):
