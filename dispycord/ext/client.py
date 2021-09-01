@@ -1,21 +1,23 @@
 import asyncio
 from typing import Optional
 
-from .. import Gateway
 from .. import HTTP
+from .. import AutoSharded
+from ..intents import Intent
 
 __all__ = ("Client",)
 
 
-class Client:
+class Client(AutoSharded):
 	
 	""" Discord Client """
 	
 	def __init__(self, **kwargs):
-		
-		self._loop: asyncio.Loop = asyncio.get_event_loop()
-		self._lock: asyncio.Lock = asyncio.Lock
-		self._gateway: Optional[Gateway] = None
+		super().__init__(
+			kwargs.get('intent', Intent.default())
+		)
+		self._loop = asyncio.get_event_loop()
+		self._lock = asyncio.Lock()
 		self._http: Optional[HTTP] = None
 		
 		self.data: Optional[dict] = None
@@ -26,12 +28,12 @@ class Client:
 		
 		:param token: Bot's token.
 		"""
-		self._gateway = Gateway(self)
 		self._http = HTTP(self, token=token)
 		
 		self._loop.run_until_complete(
-			self._gateway.connect()
+			self.new_shard()
 		)
+		self._loop.run_forever()
 		
 	def __repr__(self):
 		return self.name + '#' + self.discriminator
