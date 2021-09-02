@@ -23,8 +23,9 @@ SOFTWARE.
 '''
 import asyncio
 import json
-import aiohttp
 from typing import TYPE_CHECKING, Union
+
+import aiohttp
 
 if TYPE_CHECKING:
 	from . import ext
@@ -52,13 +53,11 @@ class Shard:
 	
 	def __init__(
 		self,
-		client,
-		shard_id: int,
-		intent: int
+		client: Union['ext.Bot', 'ext.Client'],
+		shard_id: int
 	):
 		
 		self._client = client
-		self.intent = intent
 		
 		self.shard_id = shard_id
 		self.num_shards = self._client.num_shards
@@ -81,7 +80,7 @@ class Shard:
 			'op': IDENTIFY,
 			'd': {
 				'token': self._client.http.token,
-				'intents': self.intent,
+				'intents': self._client.intent,
 				'properties': {
 					'$os': 'linux',
 					'$browser': 'dispycord',
@@ -138,7 +137,7 @@ class Shard:
 			)
 			
 	async def next_shard(self) -> None:
-		
+		''' Calling for next shard '''
 		try:
 			await self._client._lock.release()
 		except:
@@ -147,24 +146,18 @@ class Shard:
 		
 class AutoSharded:
 	
-	def __init__(
-		self,
-		intent: int
-	):
-		
-		self.intent = intent
+	def __init__(self):
 		
 		self.num_shards = 2
 		self.shards: dict = {}
 	
-	async def new_shard(self):
-		
+	async def new_shard(self) -> None:
+		''' Creating new shard object '''
 		for shard in range(self.num_shards):
 			
 			sharder = Shard(
 				self,
-				shard,
-				self.intent
+				shard
 			)
 			
 			self.shards['shard' + str(shard)] = sharder
@@ -176,3 +169,5 @@ class AutoSharded:
 				)
 				
 				await self._lock.acquire()
+				
+			await asyncio.sleep(1)

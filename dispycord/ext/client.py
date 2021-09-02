@@ -12,10 +12,11 @@ class Client(AutoSharded):
 	
 	""" Discord Client """
 	
-	def __init__(self, **kwargs):
-		super().__init__(
-			kwargs.get('intent', Intent.default())
-		)
+	def __init__(self, **option):
+		super().__init__()
+		
+		self.intent = option.get('intent', Intent.default())
+		
 		self._loop = asyncio.get_event_loop()
 		self._lock = asyncio.Lock()
 		self._http: Optional[HTTP] = None
