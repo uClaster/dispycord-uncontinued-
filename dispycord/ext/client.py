@@ -18,7 +18,6 @@ class Client(AutoSharded):
 		self.intent = option.get('intent', Intent.default())
 		
 		self._loop = asyncio.get_event_loop()
-		self._lock = asyncio.Lock()
 		self._http: Optional[HTTP] = None
 		
 		self.data: Optional[dict] = None

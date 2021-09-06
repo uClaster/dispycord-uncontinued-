@@ -1,22 +1,27 @@
 import asyncio
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, List
 
 from .client import Client
 from .core import Command
 
 
 class Bot(Client):
-	
 	''' A rewrite version of client
 	This has all : Client : functionality + more advanced features.
 	'''
-	
 	def __init__(self, **option):
 		super().__init__(**option)
 		self._commands: list = []
 		self._listeners: dict = {}
 	
-	def command(self, **option):
+	def command(
+	    self,
+	    *,
+	    name: str,
+	    description: str,
+	    type: int,
+	    guild: Union[str, int, List[Union[str, int]]]
+	) -> None:
 		''' Command registers.
 		Automatically generating slash commands.
 		
@@ -25,13 +30,13 @@ class Bot(Client):
 		
 		:param option:
 		---------------
-			| guild_only: book
+			| guild_only: bool
 		'''
 		def inner(function: Callable[..., Any]) -> Command:
 			
 			command = Command(
 				function,
-				**option
+				name=name
 			)
 			self._commands.append(command)
 			return command

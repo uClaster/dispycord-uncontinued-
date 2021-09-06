@@ -23,17 +23,16 @@ SOFTWARE.
 '''
 import asyncio
 import json
-from typing import TYPE_CHECKING, Union
+import logging
+import time
+from typing import TYPE_CHECKING, Union, Optional
 
 import aiohttp
 
+from .errors import error
+
 if TYPE_CHECKING:
 	from . import ext
-
-__all__ = (
-	'AutoSharded',
-	'Shard',
-)
 
 DISPATCH = 0
 HEARTBEAT = 1
@@ -48,35 +47,170 @@ HELLO = 10
 ACK = 11
 WSS = "wss://gateway.discord.gg/?v=9&encoding=json"
 
+log = logging.getLogger(__name__)
+
+__all__ = (
+	'AutoSharded',
+	'Shard',
+	'GatewayRateLimitter',
+)
+
+
+class GatewayRateLimitter:
+    ''' WebSocket ratelimit. '''
+    def __init__(
+        self,
+        *,
+        per_minute: int = 110,
+        per_second: int = 2
+    ):
+        '''
+        ..Gateway Ratelimit::
+            Client are allowed to send 120 gateway commands per minute
+            or average 2 command per second.
+            
+        Parameter
+        ----------
+        :per_minute: command can be sent per minute
+        :per_second: command can be sent per second
+        
+        Attributes
+        -----------
+        :remain_per_minute:
+        :remain_per_second:
+        '''
+        self.per_minute = per_minute
+        self.per_second = per_second
+        
+        self.remain_per_minute = self.per_minute
+        self.remain_per_second = self.per_second
+        
+        self.minute_future_tick = self.get_current() + 60
+        self.second_future_tick = self.minute_future_tick - 60
+        
+    async def tick(self) -> None:
+        ''' Ratelimit ticker '''
+        if self.remain_per_minute <= 0 or self.remain_per_second <= 0:
+            
+            log.warning('Gateway ratelimit.')
+            
+            await asyncio.sleep(
+                self.minute_future_tick - self.get_current()
+                if self.remain_per_minute <= 0
+                else 1
+            )
+            
+        if (t := self.get_current()) >= self.minute_future_tick:
+            self.remain_per_minute = self.per_minute
+            
+        if t >= self.second_future_tick:
+            self.remain_per_second = self.per_second
+        
+        self.remain_per_minute -= 1
+        self.remain_per_second -= 1
+        
+    def get_current(self) -> int:
+        return int(time.time())
+
 
 class Shard:
 	
 	def __init__(
 		self,
-		client: Union['ext.Bot', 'ext.Client'],
+		client: Union['ext.Bot', 'ext.Client', AutoSharded],
 		shard_id: int
 	):
 		
 		self._client = client
 		
+		self.pacemaker: Optional[asyncio.Task] = None
 		self.shard_id = shard_id
 		self.num_shards = self._client.num_shards
+		self._ratelimitter = GatewayRateLimitter()
 		
 		self._ws = None
 		self._acked: bool = False
 		self._interval: Union[int, float] = 41.25
+		self._reconnect: bool = False
 		
-	def logging(self, message: str) -> None:
-		print(f"Shard {self.shard_id}: {message}")
+		self._sequence: Optional[int] = None
+		self._session_id: Optional[str] = None
 		
+	def shard_log(self, message: str = 'No content.', logtype: str = 'debug'):
+		getattr(log, logtype)(f'Shard {self.shard_id}: {message}')
+		
+	async def spawn_ws(self) -> None:
+		''' Method call for spawning shard '''
+		async with self._client.http.client_session.ws_connect(WSS) as ws:
+			self._ws = ws
+			
+			self.shard_log('Connected to gateway', 'debug')
+			
+			while True:
+				
+				if isinstance((message := await ws.receive()).data, int):
+					
+					await self.handle_disconnect(
+						message.data,
+						message.extra
+					)
+					break
+				
+				if message.data is None:
+					await self.handle_disconnect(
+						message.data,
+						message.extra
+					)
+					break
+				
+				data = json.loads(message.data)
+				op, event, self.seq, d = data['op'], data['t'], data['s'], data['d']
+				
+				if op == HELLO:
+					
+					self.shard_log('Recieved HELLO', 'debug')
+					self.pacemaker = self._client.loop.create_task(
+						self.start_heartbeat()
+					)
+					
+				elif op == ACK:
+					self.shard_log('Recieved ACK', 'debug')
+					await self.identify()
+					
+				elif op == INVALID_SESSION:
+					self.shard_log('Stopped working', 'warning')
+					self.pacemaker.cancel()
+					self._ws.close(code=1002)
+					
+				elif op == DISPATCH:
+					
+					if event == 'READY':
+						self._session_id = d['session_id']
+						
+		if not self._acked:
+			exit(1)
+			
+		if self._ws.closed and self._reconnect:
+			await self.spawn_ws()
+			
 	async def identify(self) -> None:
+		'''
+		..identify::
+		    Used to trigger the initial handshake with the gateway.
+		    
+		Result
+		-------
+		on success: Your bot will appear online and ready for accepting requests
+		on disconnect: resuming if possible.
+		'''
+		if self._reconnect:
+			await self.resume()
+			return
 		
 		if self._acked:
 			return
 		
-		self.logging("IDENTIFYING")
-		
-		await self._ws.send_json({
+		await self.send_as_json({
 			'op': IDENTIFY,
 			'd': {
 				'token': self._client.http.token,
@@ -89,36 +223,13 @@ class Shard:
 				'shard': [self.shard_id, self.num_shards]
 			}
 		})
+		
 		self._acked = True
-		await self.next_shard()
 		
-	async def spawn_ws(self) -> None:
-		
-		self.logging("Attempt to connect.")
-		
-		async with self._client.http.client_session.ws_connect(WSS) as ws:
-			self._ws = ws
-			
-			while True:
-				
-				if (message := await ws.receive()).extra is None:
-					break
-				
-				if (op := json.loads(message.data)['op']) == HELLO:
-					
-					self._client.loop.create_task(
-						self.start_heartbeat()
-					)
-					
-				elif op == ACK:
-					
-					await self.identify()
-					
-				elif op == INVALID_SESSION:
-					self.logging("Failed to identify.")
+		self.shard_log('Connected to Discord and recieved READY state')
 	
 	async def start_heartbeat(self) -> None:
-		
+		''' Start heartbeat. '''
 		while True:
 			
 			await asyncio.sleep(
@@ -127,20 +238,50 @@ class Shard:
 				else self._interval
 			)
 			
-			self.logging("heartbeating")
-			
-			await self._ws.send_json(
+			await self.send_as_json(
 				{
 					'op': HEARTBEAT,
 					'd': None
 				}
 			)
 			
+	async def send_as_json(self, data: dict):
+	    '''
+	    Same as self._ws.send_json(dict) but with ratelimit ticker
+	    
+	    Parameter
+	    ----------
+	    :data: takes a dict to parse to JSON.
+	    '''
+	    await self._ratelimitter.tick()
+	    
+	    await self._ws.send_json(data)
+	    
+	async def resume(self):
+		self.shard_log('Shard sending resume request', 'debug')
+		self._ws.send_json({
+			'op': RESUME,
+			'd': {
+				'token': self._client.http.token,
+				'session_id': self._session_id,
+				'seq': self._sequence
+			}
+		})
+		self._reconnect = False
+	    
+	async def handle_disconnect(self, message=None, extra=None) -> None:
+		self.shard_log('Recieved a close signal.', 'warning')
+		self.pacemaker.cancel()
+		
+		if (code := str(message)) in error.keys():
+			raise error[code](extra)
+		self._reconnect = True
+	    
 	async def next_shard(self) -> None:
 		''' Calling for next shard '''
 		try:
-			await self._client._lock.release()
-		except:
+			await self._client._lock_sentinel.release()
+		except Exception:
 			...
 		
 		
@@ -148,8 +289,10 @@ class AutoSharded:
 	
 	def __init__(self):
 		
-		self.num_shards = 2
+		self.num_shards = 1 # Default 2:: not necessary for now.
 		self.shards: dict = {}
+		
+		self._lock_sentinel = asyncio.Lock()
 	
 	async def new_shard(self) -> None:
 		''' Creating new shard object '''
@@ -160,14 +303,16 @@ class AutoSharded:
 				shard
 			)
 			
+			log.debug('Spawning shard %s', shard)
+			
 			self.shards['shard' + str(shard)] = sharder
 			
-			async with self._lock:
+			async with self._lock_sentinel:
 				
 				self.loop.create_task(
 					sharder.spawn_ws()
 				)
 				
-				await self._lock.acquire()
+				await self._lock_sentinel.acquire()
 				
 			await asyncio.sleep(1)

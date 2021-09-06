@@ -1,5 +1,9 @@
+import logging
+
 import dispycord
 from dispycord import ext
+
+logging.basicConfig(level=logging.DEBUG)
 
 bot = ext.Bot(
 	intent=dispycord.Intent.get(

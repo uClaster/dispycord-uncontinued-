@@ -9,11 +9,12 @@ class Command:
 	def __init__(
 		self,
 		callback: Callable[..., Any],
-		**option
+		*,
+		name: str
 	):
 
 		self._callback: F = callback
-		self._option = option
+		self._name: str = name
 		
 		self._error: Optional[F] = None
 		

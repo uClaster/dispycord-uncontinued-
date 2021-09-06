@@ -10,4 +10,5 @@ ignore =
 	# F401: Unused imports.
 	F401,
 	E261,
-	E226
+	E226,
+	E101
