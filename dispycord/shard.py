@@ -25,10 +25,11 @@ import asyncio
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Union, Optional
+from typing import Any, TYPE_CHECKING, Union, Optional
 
 import aiohttp
 
+from .abc import Message
 from .errors import error
 
 if TYPE_CHECKING:
@@ -148,7 +149,7 @@ class Shard:
             
             while True:
                 
-                if isinstance((message := await ws.receive()).data, int):
+                if isinstance((message := await ws.receive()).data, int) or message.data is None:
                     
                     await self.handle_disconnect(
                         message.data,
@@ -156,15 +157,11 @@ class Shard:
                     )
                     break
             
-                if message.data is None:
-                    await self.handle_disconnect(
-                            message.data,
-                            message.extra
-                        )
-                    break
-            
                 data = json.loads(message.data)
-                op, event, self.seq, d = data['op'], data['t'], data['s'], data['d']
+                op = data['op']
+                event = data['t']
+                self.seq = data['s']
+                d = data['d']
                 
                 if op == HELLO:
                     
@@ -183,9 +180,7 @@ class Shard:
                     self._ws.close(code=1002)
                     
                 elif op == DISPATCH:
-                    
-                    if event == 'READY':
-                        self._session_id = d['session_id']
+                    await self.handle_event(event, d)
                         
         if not self._acked:
             exit(1)
@@ -200,7 +195,8 @@ class Shard:
             
         Result
         -------
-        on success: Your bot will appear online and ready for accepting requests
+        on success: Your bot will appear online
+                    and ready to accept requests.
         on disconnect: resuming if possible.
         '''
         if self._reconnect:
@@ -270,12 +266,43 @@ class Shard:
         self._reconnect = False
         
     async def handle_disconnect(self, message=None, extra=None) -> None:
+        '''
+        Websockets are encountered an issues.
+        Checking whether resume is possible or raise an error.
+        '''
         self.shard_log('Recieved a close signal.', 'warning')
         self.pacemaker.cancel()
         
         if (code := str(message)) in error.keys():
             raise error[code](extra)
         self._reconnect = True
+        
+    async def handle_event(self, ev: str, payload: dict) -> Optional[Any]:
+        '''
+        Event Handler
+        
+        Parameters
+        ----------
+        :ev: Event's name
+        :payload: Event's data
+        '''
+        if (ev := ev.lower()) == "ready":
+            
+            self._session_id = payload['session_id']
+            self._client.user = payload['user']
+            
+            self._client._build_command()
+            
+            return await self._client.dispatch('on_ready')
+        
+        if ev.split('_')[0] == "message":
+            
+            return await self._client.dispatch(
+                'on_' + ev,
+                Message(self._client.http, payload)
+            )
+        
+        # Interaction create handler
         
     async def next_shard(self) -> None:
         ''' Calling for next shard '''
@@ -289,7 +316,7 @@ class AutoSharded:
     
     def __init__(self):
         
-        self.num_shards = 1 # Default 2:: not necessary for now.
+        self.num_shards = 1 # Default 2:: not needed for now.
         self.shards: dict = {}
         
         self._lock_sentinel = asyncio.Lock()
